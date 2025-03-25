@@ -1,4 +1,5 @@
 import numpy as np
+import scipy.stats as stats
 
 
 class CovarianceFunction:
@@ -190,3 +191,25 @@ class TopBaseProcessPair:
 
         top_sample = base_sample - thickness_sample
         return {"top": top_sample, "base": base_sample}
+
+
+class ZonalField:
+    def __init__(self, trend_zrel: list, trend_vals: list):
+        self.trend_zrel = trend_zrel
+        self.trend_vals = trend_vals
+
+    def eval(self, z, noise_params: dict = None):
+        signal = np.interp(z, self.trend_zrel, self.trend_vals)
+        if noise_params is not None:
+            noise = np.random.normal(noise_params["mean"], noise_params["sd"], len(z))
+            return signal + noise
+        else:
+            return signal
+    
+    def triplet_trend_prediction(self, z_well: float, z_top: float, z_base: float) -> float:
+        rel_thickness = (z_well - z_top) / (z_base - z_top)
+        return np.interp(rel_thickness, self.trend_zrel, self.trend_vals)
+    
+    def triplet_likelihood(self, z_well: float, z_top: float, z_base: float, observed_value: float, standard_deviation: float) -> float:
+        predicted_value = self.triplet_trend_prediction(z_well, z_top, z_base)
+        return stats.norm.pdf(observed_value, loc=predicted_value, scale=standard_deviation)

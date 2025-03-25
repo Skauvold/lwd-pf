@@ -35,12 +35,15 @@ tbpp = TopBaseProcessPair(gp_base, gp_thickness)
 ref = tbpp.draw_full()
 
 # Draw some conditional samples
-x_obs = [0.0, 0.1, 0.2]
+x_now = 0.5
+delta_x_forward = 0.1
+delta_x_backward = 0.05
+x_obs = np.linspace(x_now - delta_x_backward, x_now, 5).tolist()
 z_obs = tbpp.interpolate_sample(x_obs, ref)
 
-x_eval = [0.3, 0.35, 0.4]
+x_eval = np.linspace(x_now, x_now + delta_x_forward, 5).tolist()
 
-samples = [tbpp.draw_conditional_points(x_eval, x_obs, z_obs) for _ in range(1)]
+samples = [tbpp.draw_conditional_points(x_eval, x_obs, z_obs) for _ in range(40)]
 
 
 plt.figure()
@@ -55,8 +58,8 @@ plt.plot(x_obs, z_obs["base"], "rs")
 
 # Cond. samples
 for sample in samples:
-    plt.plot(x_eval, sample["top"], "go-", alpha=0.5)
-    plt.plot(x_eval, sample["base"], "ro-", alpha=0.5)
+    plt.plot(x_eval, sample["top"], "g-", alpha=0.25)
+    plt.plot(x_eval, sample["base"], "r-", alpha=0.25)
 
 plt.plot(tbpp.xvals, tbpp.mean_top(), "g-", linewidth=1)
 plt.plot(tbpp.xvals, tbpp.mean_base(), "r-", linewidth=1)
