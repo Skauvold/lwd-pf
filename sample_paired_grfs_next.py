@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from utils import CovarianceFunction, GenExp, GaussianProcess, TopBaseProcessPair
+from utils import GenExp, GaussianProcess, TopBaseProcessPair
 
 domain = {"xmin": 0, "xmax": 1, "n": 40}
 
@@ -26,7 +26,7 @@ def mean_func_thickness(x):
     return np.full_like(x, 0.5)
 
 
-# Create a Gaussian processes
+# Create process pair
 gp_base = GaussianProcess(cov_func_base, mean_func_base, domain)
 gp_thickness = GaussianProcess(cov_func_thickness, mean_func_thickness, domain)
 tbpp = TopBaseProcessPair(gp_base, gp_thickness)
@@ -34,40 +34,35 @@ tbpp = TopBaseProcessPair(gp_base, gp_thickness)
 # Draw a realization
 ref = tbpp.draw_full()
 
-# Sample single element given everything to the left
-index = 16
-ref_truncated = {k: v[:index] for k, v in ref.items()}
-samples = [tbpp.draw_left_conditional(index, ref_truncated) for _ in range(100)]
+# Draw some conditional samples
+x_obs = [0.0, 0.1, 0.2]
+z_obs = tbpp.interpolate_sample(x_obs, ref)
 
-# Plot the samples
+x_eval = [0.3, 0.35, 0.4]
+
+samples = [tbpp.draw_conditional_points(x_eval, x_obs, z_obs) for _ in range(1)]
+
+
 plt.figure()
 
-plt.plot(tbpp.xvals[:index], ref["top"][:index], "g-", alpha=0.5)
-plt.plot(tbpp.xvals[:index], ref["base"][:index], "r-", alpha=0.5)
+# Reference
+plt.plot(tbpp.xvals, ref["top"], "g-", alpha=0.5)
+plt.plot(tbpp.xvals, ref["base"], "r-", alpha=0.5)
 
-# Plot the samples
-# x_index_list = [tbpp.xvals[index]] * len(samples)
-# plt.scatter(x_index_list, [s["top"] for s in samples], c="g", marker="o")
-# plt.scatter(x_index_list, [s["base"] for s in samples], c="r", marker="o")
+# Observations
+plt.plot(x_obs, z_obs["top"], "gs")
+plt.plot(x_obs, z_obs["base"], "rs")
+
+# Cond. samples
 for sample in samples:
-    plt.plot(
-        tbpp.xvals[index - 1 : index + 1],
-        [ref["top"][index - 1], sample["top"]],
-        "g-",
-        alpha=0.5,
-    )
-    plt.plot(
-        tbpp.xvals[index - 1 : index + 1],
-        [ref["base"][index - 1], sample["base"]],
-        "r-",
-        alpha=0.5,
-    )
+    plt.plot(x_eval, sample["top"], "go-", alpha=0.5)
+    plt.plot(x_eval, sample["base"], "ro-", alpha=0.5)
 
 plt.plot(tbpp.xvals, tbpp.mean_top(), "g-", linewidth=1)
 plt.plot(tbpp.xvals, tbpp.mean_base(), "r-", linewidth=1)
 
 plt.xlabel("x")
-plt.ylabel("f(x)")
+plt.ylabel("z")
 
 plt.ylim(tbpp.limits(n_std=4))
 

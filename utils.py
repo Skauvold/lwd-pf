@@ -16,16 +16,25 @@ class CovarianceFunction:
                 K[i, j] = self.cov(xs[i], xs[j])
         return K
 
-    def cross_cov(self, x, xs):
+    def cross_cov_one_to_many(self, x, xs):
         n = len(xs)
         K = np.zeros(n)
         for i in range(n):
             K[i] = self.cov(x, xs[i])
         return K
+    
+    def cross_cov_many_to_many(self, xs, ys):
+        n = len(xs)
+        m = len(ys)
+        K = np.zeros((n, m))
+        for i in range(n):
+            for j in range(m):
+                K[i, j] = self.cov(xs[i], ys[j])
+        return K
 
 
 class GenExp(CovarianceFunction):
-    def cov(self, x1, x2):
+    def cov(self, x1: float, x2: float) -> float:
         return self.params["standard_deviation"] ** 2 * np.exp(
             -np.power(
                 np.abs(x1 - x2) / self.params["correlation_range"],
@@ -40,6 +49,7 @@ class GaussianProcess:
         self.xvals = np.linspace(domain["xmin"], domain["xmax"], domain["n"])
         self.K = self.cov_func.cov_matrix(self.xvals)
         self.mean_vec = mean_func(self.xvals)
+        self.mean_func = mean_func
 
     def mean(self) -> tuple:
         return self.mean_vec
@@ -95,6 +105,20 @@ class GaussianProcess:
         mu = mu2 + np.dot(K21, np.linalg.solve(K11, np.array(cond_vals) - mu1))
         cov = K22 - np.dot(K21, np.linalg.solve(K11, K12))
         return np.random.normal(mu, cov)
+    
+    # - draw conditional value at an x-value given a list of x-values and their z-values
+    def draw_conditional_points(self, xvals_query: list, xvals_cond: list, zvals_cond: list):
+        K = self.K
+        K11 = self.cov_func.cov_matrix(xvals_cond)
+        K12 = self.cov_func.cross_cov_many_to_many(xvals_query, xvals_cond)
+        K21 = self.cov_func.cross_cov_many_to_many(xvals_cond, xvals_query)
+        K22 = self.cov_func.cov_matrix(xvals_query)
+        mu1 = self.mean_func(np.array(xvals_cond))
+        mu2 = self.mean_func(np.array(xvals_query))
+        mu = mu2 + np.matmul(K21.T, np.linalg.solve(K11, np.array(zvals_cond) - mu1))
+        cov = K22 - np.matmul(K21.T, np.linalg.solve(K11, K12.T))
+        realization = np.random.multivariate_normal(mu, cov)
+        return realization
 
 
 class TopBaseProcessPair:
@@ -114,6 +138,15 @@ class TopBaseProcessPair:
 
     def mean_base(self):
         return self.base_gp.mean()
+    
+    def interpolate_sample(self, xs: list, sample: dict):
+        zs_base = sample["base"]
+        zs_top = sample["top"]
+        zs_thickness = [z_base - z_top for z_base, z_top in zip(zs_base, zs_top)]
+        thickness_sample = np.interp(xs, self.xvals, zs_thickness)
+        base_sample = np.interp(xs, self.xvals, zs_base)
+        top_sample = base_sample - thickness_sample
+        return {"top": top_sample, "base": base_sample}
 
     def limits(self, n_std=3):
         top_limits = self.base_gp.limits(n_std=n_std)
@@ -146,3 +179,14 @@ class TopBaseProcessPair:
 
     # TODO:
     # - draw conditional value at an x-value given a list of x-values and their z-values
+    def draw_conditional_points(self, xvals_query: list, xvals_cond: list, zvals_cond: dict):
+        zvals_cond_base = zvals_cond["base"]
+        zvals_cond_top = zvals_cond["top"]
+        thickness_cond_as_list = [cv_base - cv_top for cv_base, cv_top in zip(zvals_cond_base, zvals_cond_top)]
+        base_cond_as_list = [cv_base for cv_base in zvals_cond_base]
+
+        base_sample = self.base_gp.draw_conditional_points(xvals_query, xvals_cond, base_cond_as_list)
+        thickness_sample = self.thickness_gp.draw_conditional_points(xvals_query, xvals_cond, thickness_cond_as_list)
+
+        top_sample = base_sample - thickness_sample
+        return {"top": top_sample, "base": base_sample}
