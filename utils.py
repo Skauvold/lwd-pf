@@ -1,5 +1,7 @@
 import numpy as np
 import scipy.stats as stats
+import matplotlib.pyplot as plt
+from copy import deepcopy
 
 
 class CovarianceFunction:
@@ -68,6 +70,9 @@ class GaussianProcess:
         var = self.cov_func.cov_matrix([x])[0, 0]
         mean = self.mean_func([x])[0]
         return np.random.normal(mean, np.sqrt(var))
+
+    def draw_points(self, xs: list):
+        return np.random.multivariate_normal(self.mean_func(xs), self.cov_func.cov_matrix(xs))
 
     def draw_conditional(self, cond_indices: list, cond_vals: list):
         K = self.K
@@ -144,6 +149,12 @@ class TopBaseProcessPair:
     def draw_single(self, x: float) -> dict:
         base_sample = self.base_gp.draw_single(x)
         thickness_sample = self.thickness_gp.draw_single(x)
+        top_sample = base_sample - thickness_sample
+        return {"top": top_sample, "base": base_sample}
+    
+    def draw_points(self, xs: list):
+        base_sample = self.base_gp.draw_points(xs)
+        thickness_sample = self.thickness_gp.draw_points(xs)
         top_sample = base_sample - thickness_sample
         return {"top": top_sample, "base": base_sample}
 
@@ -255,11 +266,16 @@ class Particle:
 
     def tb(self):
         return {"top": self.z_top, "base": self.z_base}
+    
+    def evaluate_tb(self, xs: list):
+        top_sample = np.interp(xs, self.x, self.z_top)
+        base_sample = np.interp(xs, self.x, self.z_base)
+        return {"top": top_sample, "base": base_sample}
 
     def extend(self, tb_sample: dict, xs, overlap: int = 1):
-        self.x.extend(xs[overlap:])
-        self.z_top.extend(tb_sample["top"][overlap:])
-        self.z_base.extend(tb_sample["base"][overlap:])
+        self.x = np.append(self.x[:-overlap], xs)
+        self.z_top = np.append(self.z_top[:-overlap], tb_sample["top"])
+        self.z_base = np.append(self.z_base[:-overlap], tb_sample["base"])
 
 
 class ParticleFilter:
@@ -283,17 +299,17 @@ class ParticleFilter:
 
         self.domain = domain
         self.particles = self.init_particles()
+        self.max_weight = 1.0 / self.n_particles
 
     def init_particles(self):
         particles = []
 
-        x0 = self.x_obs[0]
+        xs = np.linspace(self.domain["xmin"], self.x_obs[0], num=10)
         weight = 1.0 / self.n_particles
 
         for i in range(self.n_particles):
-            # TODO: Draw multiple values covering interval from left end to x0
-            tb_sample = self.tbpp.draw_single(x0)
-            particles.append(Particle(tb_sample, [x0], weight))
+            tb_sample = self.tbpp.draw_points(xs)
+            particles.append(Particle(tb_sample, xs, weight))
 
         return particles
 
@@ -309,7 +325,7 @@ class ParticleFilter:
         xs_past = np.linspace(x_past_start, x_past_end, nx_past).tolist()
 
         for p in self.particles:
-            tb_past = self.tbpp.interpolate_sample(xs_past, p.tb())
+            tb_past = p.evaluate_tb(xs_past)
             tb_new = self.tbpp.draw_conditional_points(xs_new, xs_past, tb_past)
             p.extend(tb_new, xs_new)
 
@@ -326,11 +342,26 @@ class ParticleFilter:
         weights = weights / np.sum(weights)
         for i, p in enumerate(self.particles):
             p.weight = weights[i]
+        self.max_weight = max(weights)
 
     def resample(self):
         indices = np.random.choice(
             range(self.n_particles),
             size=self.n_particles,
-            p=[p.weight for p in self.particles],
+            p=[particle.weight for particle in self.particles],
         )
-        self.particles = [self.particles[i].copy() for i in indices]
+        self.particles = [deepcopy(self.particles[i]) for i in indices]
+        for particle in self.particles:
+            particle.weight = 1.0 / self.n_particles
+        self.max_weight = 1.0 / self.n_particles
+    
+    def plot_particles(self, ax: plt.Axes):
+        cmap = plt.get_cmap("jet")
+        for p in self.particles:
+            weight01 = p.weight / self.max_weight
+            particle_color = cmap(weight01)
+            ax.plot(p.x, p.z_top, color=particle_color, alpha=0.5)
+            ax.plot(p.x, p.z_base, color=particle_color, alpha=0.5)
+        ax.scatter(self.x_obs, self.z_obs, color="black", marker="x")
+        ax.set_xlabel("x")
+        ax.set_ylabel("z")
